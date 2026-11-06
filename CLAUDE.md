@@ -10,6 +10,7 @@
   - Then wait for my reply. Continue only on what I say next; don't resume the skill on your own.
 - Before reporting a coding task as done, run the project's tests and show the result. If no tests cover the change, write them first.
 - When you create a chart, image or report that I should look at, run `show <file>` once. To check a chart yourself, read the image file with the Read tool.
+- Before adding or changing a CI workflow that runs end-to-end tests, stop and ask me first, even if I asked for it. Explain that e2e runs are heavy and can use up GitHub Actions minutes and add charges to my account, then wait for my yes.
 
 ## Tools
 - Available and authenticated: `gh`, `hf`, `kaggle`, `uv`. Use these CLIs for GitHub, Hugging Face and Kaggle instead of guessing or asking me to do it.
