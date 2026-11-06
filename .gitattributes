@@ -1,0 +1,2 @@
+# settings.json stores $HOME as @HOME@ in git. scripts/move.sh sets up the filter.
+settings.json filter=home

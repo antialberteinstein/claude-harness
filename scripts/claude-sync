@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# claude-sync — đồng bộ harness với settings.json.
+#   1. Cài các marketplace/plugin đã khai báo mà máy chưa có
+#      (~/.claude/settings.json ở scope user, ./.claude/settings.json ở scope project).
+#   2. Cài/cập nhật ECC bằng install-necessary-ecc-user.sh nằm cùng thư mục,
+#      chỉ khi chưa cài hoặc GitHub có commit mới hơn.
+# Không gỡ gì. Chạy lại nhiều lần vẫn an toàn.
+#
+# Dùng:  claude-sync              đồng bộ
+#        claude-sync -n           chỉ in ra sẽ làm gì
+#        claude-sync --force-ecc  cài lại ECC dù đã mới nhất (vd. sau khi sửa danh sách trong script ECC)
+#        claude-sync --skip-ecc   chỉ đồng bộ plugin
+set -euo pipefail
+
+DRY=0; ECC_MODE=auto
+for arg in "$@"; do
+  case "$arg" in
+    -n) DRY=1 ;;
+    --force-ecc) ECC_MODE=force ;;
+    --skip-ecc) ECC_MODE=skip ;;
+    *) echo "Tham số lạ: $arg" >&2; exit 2 ;;
+  esac
+done
+# Tìm thư mục thật của script, kể cả khi gọi qua symlink (không dùng readlink -f: macOS cũ không có)
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"
+  [[ "$src" == /* ]] || src="$dir/$src"
+done
+SELF_DIR="$(cd "$(dirname "$src")" && pwd)"
+ECC_SCRIPT="$SELF_DIR/install-necessary-ecc-user.sh"
+
+# timeout không có sẵn trên macOS; dùng gtimeout (coreutils) nếu có, không thì chạy thẳng
+tmo() { local s="$1"; shift
+  if command -v timeout >/dev/null; then timeout "$s" "$@"
+  elif command -v gtimeout >/dev/null; then gtimeout "$s" "$@"
+  else "$@"; fi; }
+
+CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+USER_SETTINGS="$CFG/settings.json"
+PROJ_SETTINGS="$PWD/.claude/settings.json"
+INSTALLED="$CFG/plugins/installed_plugins.json"
+KNOWN="$CFG/plugins/known_marketplaces.json"
+
+command -v jq >/dev/null     || { echo "Cần jq (macOS: brew install jq · Fedora: sudo dnf install jq)" >&2; exit 1; }
+command -v claude >/dev/null || { echo "Không thấy claude trong PATH" >&2; exit 1; }
+
+changed=0
+failed=0
+
+run() {
+  echo "  → $*"
+  (( DRY == 1 )) && return 0
+  if "$@" </dev/null; then
+    changed=1
+  else
+    echo "  ✗ thất bại: $*" >&2
+    failed=1
+  fi
+}
+
+# Cài một plugin. Nếu marketplace trên máy đã cũ ("not found in marketplace"),
+# cập nhật marketplace đó một lần rồi thử lại.
+install_plugin() { # key scope
+  local key="$1" scope="$2" out
+  echo "  → claude plugin install $key --scope $scope"
+  (( DRY == 1 )) && return 0
+  if out=$(claude plugin install "$key" --scope "$scope" </dev/null 2>&1); then
+    [[ -n "$out" ]] && echo "$out"; changed=1; return 0
+  fi
+  echo "$out"
+  if grep -q "not found in marketplace" <<<"$out"; then
+    local mkt="${key#*@}"
+    echo "  ↻ marketplace '$mkt' có thể đã cũ, cập nhật rồi thử lại"
+    if claude plugin marketplace update "$mkt" </dev/null && claude plugin install "$key" --scope "$scope" </dev/null; then
+      changed=1; return 0
+    fi
+  fi
+  echo "  ✗ thất bại: claude plugin install $key --scope $scope" >&2
+  failed=1
+}
+
+known_has() { # tên marketplace
+  [[ -f "$KNOWN" ]] && jq -e --arg m "$1" 'has($m)' "$KNOWN" >/dev/null
+}
+
+# Marketplace dùng được nếu: là marketplace chính thức, đã có trên máy,
+# hoặc được khai báo trong extraKnownMarketplaces của settings user/project.
+marketplace_available() { # tên
+  [[ "$1" == claude-plugins-official ]] && return 0
+  known_has "$1" && return 0
+  local f
+  for f in "$USER_SETTINGS" "$PROJ_SETTINGS"; do
+    [[ -f "$f" ]] && jq -e --arg m "$1" '(.extraKnownMarketplaces // {}) | has($m)' "$f" >/dev/null && return 0
+  done
+  return 1
+}
+
+# Marketplace khai báo dạng thư mục cục bộ nhưng thư mục chưa tồn tại (vd. kessie-local trên máy mới)
+missing_local_dir() { # tên
+  local f p
+  for f in "$USER_SETTINGS" "$PROJ_SETTINGS"; do
+    [[ -f "$f" ]] || continue
+    p=$(jq -r --arg m "$1" '.extraKnownMarketplaces[$m].source | select(.source == "directory") | .path // empty' "$f")
+    [[ -n "$p" && ! -d "$p" ]] && return 0
+  done
+  return 1
+}
+
+installed_has() { # key scope
+  [[ -f "$INSTALLED" ]] || return 1
+  jq -e --arg k "$1" --arg s "$2" --arg p "$PWD" '
+    (.plugins[$k] // []) | any(.scope == $s and ($s == "user" or .projectPath == $p))
+  ' "$INSTALLED" >/dev/null
+}
+
+sync_file() { # file scope
+  local file="$1" scope="$2"
+  [[ -f "$file" ]] || return 0
+  jq empty "$file" 2>/dev/null || { echo "JSON không hợp lệ: $file" >&2; exit 1; }
+  echo "[$scope] $file"
+
+  local name type repo key
+  while IFS=$'\t' read -r name type repo; do
+    [[ -n "$name" ]] || continue
+    known_has "$name" && continue
+    if [[ "$type" == "github" && -n "$repo" ]]; then
+      run claude plugin marketplace add "$repo"
+    elif [[ "$type" == "directory" && -n "$repo" ]]; then
+      if [[ -d "$repo" ]]; then run claude plugin marketplace add "$repo"
+      else echo "  … marketplace '$name' ($repo) chưa có trên máy; bước ECC sẽ tạo"; fi
+    else
+      echo "  ! marketplace '$name' dùng source '$type': tự thêm bằng /plugin" >&2
+    fi
+  done < <(jq -r '(.extraKnownMarketplaces // {}) | to_entries[]
+                  | [.key, (.value.source.source // ""), (.value.source.repo // .value.source.path // "")] | @tsv' "$file")
+
+  while read -r key; do
+    [[ -n "$key" ]] || continue
+    installed_has "$key" "$scope" && continue
+    local mkt="${key#*@}"
+    if ! known_has "$mkt" && missing_local_dir "$mkt"; then
+      echo "  … $key: chờ bước ECC tạo plugin cục bộ"; continue
+    fi
+    if ! marketplace_available "$mkt"; then
+      echo "  ✗ $key: marketplace '$mkt' chưa khai báo và chưa có trên máy. Thêm vào extraKnownMarketplaces:" >&2
+      echo "      \"$mkt\": { \"source\": { \"source\": \"github\", \"repo\": \"<owner>/<repo>\" } }" >&2
+      failed=1; continue
+    fi
+    install_plugin "$key" "$scope"
+  done < <(jq -r '(.enabledPlugins // {}) | to_entries[] | select(.value == true) | .key' "$file")
+}
+
+files=("$USER_SETTINGS")
+[[ "$PROJ_SETTINGS" != "$USER_SETTINGS" ]] && files+=("$PROJ_SETTINGS")
+for f in "${files[@]}"; do   # kiểm tra JSON trước khi cài bất cứ thứ gì
+  [[ -f "$f" ]] && ! jq empty "$f" 2>/dev/null && { echo "JSON không hợp lệ: $f" >&2; exit 1; }
+done
+
+sync_file "$USER_SETTINGS" user
+(( ${#files[@]} > 1 )) && sync_file "$PROJ_SETTINGS" project
+
+# ─── ECC ────────────────────────────────────────────────────────────
+sync_ecc() {
+  [[ "$ECC_MODE" == skip ]] && return 0
+  echo "[ecc]"
+  if [[ ! -f "$ECC_SCRIPT" ]]; then
+    echo "  ! không thấy $ECC_SCRIPT, bỏ qua ECC" >&2; return 0
+  fi
+  local cur latest
+  cur=$(sed -n 's/^commit: //p' "$CFG/ecc/SOURCE" 2>/dev/null || true)
+  if [[ "$ECC_MODE" == auto && -n "$cur" && -z "${ECC_REF:-}" ]]; then
+    latest=$(tmo 20 git ls-remote https://github.com/affaan-m/ECC HEAD 2>/dev/null | cut -f1 || true)
+    if [[ -z "$latest" ]]; then
+      echo "  ! không kiểm tra được bản ECC mới nhất (mạng?), giữ ${cur:0:7}" >&2; return 0
+    elif [[ "$latest" == "$cur" ]]; then
+      echo "  ECC đã mới nhất (${cur:0:7})"; return 0
+    fi
+    echo "  ECC ${cur:0:7} → ${latest:0:7}"
+  fi
+  local args=(); (( DRY == 1 )) && args+=(-n)
+  echo "  → install-necessary-ecc-user.sh ${args[*]:-}"
+  if bash "$ECC_SCRIPT" ${args[@]+"${args[@]}"}; then   # dạng này an toàn với mảng rỗng trên bash 3.2
+    (( DRY == 1 )) || changed=1
+  else
+    echo "  ✗ cài ECC thất bại" >&2; failed=1
+  fi
+}
+sync_ecc
+
+if (( DRY == 1 )); then
+  echo "Chạy thử: chưa cài gì."
+elif (( failed == 1 )); then
+  echo "Có lệnh thất bại, xem các dòng ✗ ở trên." >&2
+elif (( changed == 1 )); then
+  echo "Đã cài xong. Trong Claude Code, chạy /reload-plugins."
+else
+  echo "Đã đồng bộ, không có gì để cài."
+fi
+exit "$failed"

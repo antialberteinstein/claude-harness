@@ -1,0 +1,29 @@
+# This repo is ~/.claude itself. Ignore everything by default;
+# only the paths listed below are tracked.
+/*
+
+# Repo files
+!/.gitignore
+!/.gitattributes
+!/.github/
+!/README.md
+!/LICENSE
+!/CONTRIBUTING.md
+!/CODE_OF_CONDUCT.md
+!/SECURITY.md
+
+# Harness config
+!/CLAUDE.md
+!/settings.json
+!/statusline.sh
+!/themes/
+!/scripts/
+
+# Installed by ECC (MIT, Affaan Mustafa); reinstalled by claude-sync
+/scripts/hooks/
+/scripts/lib/
+
+# Per-machine overrides
+/scripts/setup.d/config.local.sh
+*.bak
+.DS_Store

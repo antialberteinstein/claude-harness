@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "ECC_HOOK_PROFILE": "standard",
+    "ECC_DISABLED_HOOKS": "pre:bash:auto-tmux-dev,pre:bash:tmux-reminder,pre:bash:git-push-reminder,pre:write:doc-file-warning,pre:observe,pre:observe:continuous-learning,post:observe:continuous-learning,stop:evaluate-session,stop:cost-tracker,post:ecc-metrics-bridge,stop:desktop-notify,pre:bash:gateguard-fact-force,pre:edit-write:gateguard-fact-force,pre:powershell:gateguard-fact-force"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh release create:*)",
+      "Bash(hf upload:*)",
+      "Bash(kaggle competitions submit:*)",
+      "Bash(kaggle kernels push:*)",
+      "Bash(kaggle datasets create:*)",
+      "Bash(kaggle datasets version:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.claude.json)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(rm -rf:*)"
+    ]
+  },
+  "model": "opus",
+  "theme": "custom:catppuccin-mocha",
+  "editorMode": "normal",
+  "vimInsertModeRemaps": {
+    "jj": "<Esc>"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline.sh",
+    "hideVimModeIndicator": true
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "kessie-skills@kessie": true,
+    "andrej-karpathy-skills@karpathy-skills": true,
+    "ecc-hooks@kessie-local": true
+  },
+  "extraKnownMarketplaces": {
+    "kessie": {
+      "source": {
+        "source": "github",
+        "repo": "antialberteinstein/kessie-skills"
+      }
+    },
+    "karpathy-skills": {
+      "source": {
+        "source": "github",
+        "repo": "multica-ai/andrej-karpathy-skills"
+      }
+    },
+    "kessie-local": {
+      "source": {
+        "source": "directory",
+        "path": "@HOME@/.claude/local-plugins"
+      }
+    }
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/notify.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/notify.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true,
+  "autoMemoryEnabled": true
+}
