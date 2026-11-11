@@ -94,5 +94,11 @@ check "validate: báo thiếu statusline.sh"             has "$out" "thiếu ~/.
 out=$(run --os fedora --only nosuch); rc=$?
 check "--only module không tồn tại thì lỗi"           [ "$rc" -ne 0 ]
 
+# ── statusline, move.sh: rút gọn $HOME thành ~ (không phải \~) ─────────
+out=$(cd / && env -i HOME=/home/u PATH="/usr/bin:/bin" CLAUDE_SL_NERD=0 bash "$ROOT/../statusline.sh" <<<'{"cwd":"/home/u/proj"}' \
+      | sed $'s/\033\\[[0-9;]*m//g')
+check "statusline: hiện ~/proj"                       has "$out" " ~/proj "
+check "move.sh: không in \\~ cho đường dẫn sao lưu"   hasnt "$(cat "$ROOT/move.sh")" '$HOME/\~}'
+
 echo "---"; echo "$pass passed, $failn failed"
 [ "$failn" -eq 0 ]
