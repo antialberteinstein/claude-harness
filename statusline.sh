@@ -49,7 +49,7 @@ vim_mode=$(j '.vim.mode')
 ctx=$(j '.context_window.used_percentage | floor')
 lim=$(j '.rate_limits.five_hour.used_percentage | floor')
 
-short="${dir/#$HOME/\~}"
+t='~'; short="${dir/#$HOME/$t}"   # qua biến: viết thẳng \~ thì bash in ra "\~"
 # thu gọn đường dẫn dài: ~/a/b/c/d → ~/…/c/d
 IFS=/ read -r -a parts <<<"$short"
 if (( ${#parts[@]} > 4 )); then short="${parts[0]}/…/${parts[${#parts[@]}-2]}/${parts[${#parts[@]}-1]}"; fi
